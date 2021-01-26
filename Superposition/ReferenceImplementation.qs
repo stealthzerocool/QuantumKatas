@@ -272,6 +272,46 @@ namespace Quantum.Kata.Superposition {
         }
     }
 
+    // ------------------------------------------------------
+    // Task 1.14. Superposition of all bit strings of the given parity
+    // Inputs:
+    //      1) N qubits in |0..0⟩ state (stored in an array of length N).
+    //      2) An int "parity".
+    // Goal: change the state to an equal superposition of all basis states that have
+    //       an even number of 1s in them if "parity" = 0, or
+    //       an odd number of 1s in them if "parity" = 1.
+    operation AllStatesWithParitySuperposition_Reference (qs : Qubit[], parity : Int) : Unit is Adj + Ctl {
+        // base of recursion: if N = 1, set the qubit to parity
+        let N = Length(qs);
+        if (N == 1) {
+            if (parity == 1) {
+                X(qs[0]);
+            }
+        } else {
+            // split the first qubit into 0 and 1 (with equal amplitudes!)
+            H(qs[0]);
+            // prep 0 ⊗ state with the same parity and 1 ⊗ state with the opposite parity
+            (ControlledOnInt(0, AllStatesWithParitySuperposition_Reference))(qs[0 .. 0], (qs[1 ...], parity));
+            (ControlledOnInt(1, AllStatesWithParitySuperposition_Reference))(qs[0 .. 0], (qs[1 ...], 1 - parity));
+        }
+    }
+
+    // Alternative solution, based on post-selection
+    operation AllStatesWithParitySuperposition_Postselection (qs : Qubit[], parity : Int) : Unit {
+        using (anc = Qubit()) {
+            // Create equal superposition of all basis states
+            ApplyToEach(H, qs);
+            // Calculate the parity of states using CNOTs
+            ApplyToEach(CNOT(_, anc), qs);
+            let res = MResetZ(anc);
+            // Now, if we got measurement result that matches parity, we're good; 
+            // otherwise we can apply X to any one qubit to get our result!
+            if ((res == Zero ? 0 | 1) != parity) {
+                X(qs[0]);
+            }
+        }
+    }
+
 
     //////////////////////////////////////////////////////////////////
     // Part II. Arbitrary Rotations
@@ -339,8 +379,8 @@ namespace Quantum.Kata.Superposition {
         // First create (|00⟩ + |01⟩ + |10⟩) / sqrt(3) state
         ThreeStates_TwoQubits_Reference(qs);
         
-        R1(2.0 * PI() / 3.0, qs[0]);
-        R1(4.0 * PI() / 3.0, qs[1]);
+        R1(4.0 * PI() / 3.0, qs[0]);
+        R1(2.0 * PI() / 3.0, qs[1]);
     }
 
     // ------------------------------------------------------
@@ -463,31 +503,21 @@ namespace Quantum.Kata.Superposition {
                 }
             }
 
-            if (P == N) {
-                // prepare as a power of 2 (previous task)
-                WState_PowerOfTwo_Reference(qs);
-            } else {
-                // allocate extra qubits
-                using (anc = Qubit[P - N]) {
-                    let all_qubits = qs + anc;
+            // allocate extra qubits (might be 0 qubits if N is a power of 2)
+            using (anc = Qubit[P - N]) {
+                repeat {
+                    // prepare state W_P on original + ancilla qubits
+                    WState_PowerOfTwo(qs + anc);
 
-                    repeat {
-                        // prepare state W_P on original + ancilla qubits
-                        WState_PowerOfTwo_Reference(all_qubits);
-
-                        // measure ancilla qubits; if all of the results are Zero, we get the right state on main qubits
-                        mutable allZeros = true;
-                        for (i in 0 .. (P - N) - 1) {
-                            if (not IsResultZero(M(anc[i]))) {
-                                set allZeros = false;
-                            }
+                    // measure extra qubits; if all of the results are Zero, we got the right state on main qubits
+                    mutable allZeros = true;
+                    for (i in 0 .. (P - N) - 1) {
+                        if (MResetZ(anc[i]) == One) {
+                            set allZeros = false;
                         }
                     }
-                    until (allZeros)
-                    fixup {
-                        ResetAll(anc);
-                    }
                 }
+                until (allZeros);
             }
         }
     }
